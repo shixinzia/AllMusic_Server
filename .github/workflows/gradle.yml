@@ -1,0 +1,65 @@
+name: Build Server
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-server-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+
+      - name: Build all server jars
+        run: bash ./gradlew build
+
+      - name: Collect server jars
+        run: |
+          mkdir -p release
+          shopt -s nullglob
+          jars=(build/*AllMusic_Server*.jar)
+          if [ ${#jars[@]} -eq 0 ]; then
+            exit 1
+          fi
+          cp "${jars[@]}" release/
+
+      - name: Create commit tag
+        run: |
+          tag="$(git rev-parse --short=8 HEAD)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "$tag" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$tag"
+          echo "tag=$tag" >> "$GITHUB_ENV"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.tag }}
+          name: ${{ env.tag }}
+          files: release/*.jar
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          make_latest: true
+          prerelease: false
